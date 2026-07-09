@@ -23,6 +23,8 @@
             margin-bottom: 20px;
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
         }
 
         button {
@@ -41,10 +43,16 @@
             color: #000;
         }
 
+        button.reset-btn {
+            background-color: #e50914;
+            color: #fff;
+        }
+
         #status {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: bold;
             margin-bottom: 15px;
+            color: #00bcd4;
         }
 
         #board {
@@ -105,13 +113,13 @@
     <div class="controls">
         <button id="mode-2p" class="active" onclick="setMode('2P')">2 Player</button>
         <button id="mode-bot" onclick="setMode('Bot')">Play vs Bot</button>
+        <button class="reset-btn" onclick="resetGame()">Reset</button>
     </div>
 
     <div id="status">White's Turn</div>
     <div id="board"></div>
 
     <script>
-        // Mapped 'b' to BB.jpg to handle asset file naming conventions
         const imageMap = {
             'P': 'P.jpg',  'R': 'R.jpg',  'N': 'N.jpg',  'B': 'B.jpg',  'Q': 'Q.jpg',  'K': 'K.jpg',
             'p': 'Bp.jpg', 'r': 'Br.jpg', 'n': 'Bn.jpg', 'b': 'BB.jpg', 'q': 'Bq.jpg', 'k': 'Bk.jpg'
@@ -132,6 +140,7 @@
         let selectedSquare = null;
         let validMoves = [];
         let gameMode = "2P";
+        let isGameOver = false; // Prevents moving after a win
 
         const boardElement = document.getElementById("board");
         const statusElement = document.getElementById("status");
@@ -168,6 +177,7 @@
         }
 
         function handleSquareClick(r, c) {
+            if (isGameOver) return; // Block all actions if game is won
             if (gameMode === "Bot" && turn === "B") return;
 
             const piece = boardState[r][c];
@@ -179,7 +189,7 @@
                 validMoves = [];
                 createBoard();
                 
-                if (gameMode === "Bot" && turn === "B") {
+                if (!isGameOver && gameMode === "Bot" && turn === "B") {
                     setTimeout(makeBotMove, 500);
                 }
                 return;
@@ -196,8 +206,23 @@
         }
 
         function movePiece(fromR, fromC, toR, toC) {
+            const capturedPiece = boardState[toR][toC];
+            
             boardState[toR][toC] = boardState[fromR][fromC];
             boardState[fromR][fromC] = '';
+
+            // Check if a King was captured
+            if (capturedPiece === 'k') {
+                statusElement.innerText = "🏆 White Wins by Capture!";
+                isGameOver = true;
+                return;
+            } else if (capturedPiece === 'K') {
+                statusElement.innerText = "🏆 Black Wins by Capture!";
+                isGameOver = true;
+                return;
+            }
+
+            // Normal turn toggling
             turn = turn === "W" ? "B" : "W";
             statusElement.innerText = turn === "W" ? "White's Turn" : "Black's Turn";
         }
@@ -299,6 +324,7 @@
         }
 
         function makeBotMove() {
+            if (isGameOver) return;
             const allMoves = [];
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
@@ -330,6 +356,7 @@
             turn = "W";
             selectedSquare = null;
             validMoves = [];
+            isGameOver = false;
             statusElement.innerText = "White's Turn";
             createBoard();
         }
