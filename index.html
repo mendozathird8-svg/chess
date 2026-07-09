@@ -47,7 +47,6 @@
             margin-bottom: 15px;
         }
 
-        /* FIXED BOARD LAYOUT STYLING */
         #board {
             display: grid;
             grid-template-columns: repeat(8, 1fr);
@@ -112,9 +111,10 @@
     <div id="board"></div>
 
     <script>
+        // Mapped 'b' to BB.jpg to handle asset file naming conventions
         const imageMap = {
             'P': 'P.jpg',  'R': 'R.jpg',  'N': 'N.jpg',  'B': 'B.jpg',  'Q': 'Q.jpg',  'K': 'K.jpg',
-            'p': 'Bp.jpg', 'r': 'Br.jpg', 'n': 'Bn.jpg', 'b': 'Bb.jpg', 'q': 'Bq.jpg', 'k': 'Bk.jpg'
+            'p': 'Bp.jpg', 'r': 'Br.jpg', 'n': 'Bn.jpg', 'b': 'BB.jpg', 'q': 'Bq.jpg', 'k': 'Bk.jpg'
         };
 
         let boardState = [
@@ -147,7 +147,7 @@
                     const piece = boardState[r][c];
                     if (piece && imageMap[piece]) {
                         const img = document.createElement("img");
-                        img.src = imageMap[piece]; // Direct path fix applied
+                        img.src = imageMap[piece];
                         square.appendChild(img);
                     }
 
@@ -187,7 +187,7 @@
 
             if (piece && ((turn === "W" && isWhite) || (turn === "B" && !isWhite))) {
                 selectedSquare = { r, c };
-                validMoves = getBasicMoves(r, c);
+                validMoves = getRealChessMoves(r, c);
             } else {
                 selectedSquare = null;
                 validMoves = [];
@@ -202,21 +202,92 @@
             statusElement.innerText = turn === "W" ? "White's Turn" : "Black's Turn";
         }
 
-        function getBasicMoves(r, c) {
+        function isEnemyOrEmpty(r, c, isWhite) {
+            if (r < 0 || r >= 8 || c < 0 || c >= 8) return { valid: false, stop: true };
+            const target = boardState[r][c];
+            if (!target) return { valid: true, stop: false };
+            const targetIsWhite = target === target.toUpperCase();
+            if (isWhite !== targetIsWhite) return { valid: true, stop: true };
+            return { valid: false, stop: true };
+        }
+
+        function getRealChessMoves(r, c) {
             const moves = [];
-            const directions = [
-                {r: 1, c: 0}, {r: -1, c: 0}, {r: 0, c: 1}, {r: 0, c: -1},
-                {r: 1, c: 1}, {r: 1, c: -1}, {r: -1, c: 1}, {r: -1, c: -1}
-            ];
-            
-            // Simple validation demo: Allow moving to adjacent empty blocks or enemy pieces
-            directions.forEach(d => {
-                const targetR = r + d.r;
-                const targetC = c + d.c;
-                if (targetR >= 0 && targetR < 8 && targetC >= 0 && targetC < 8) {
-                    moves.push({ r: targetR, c: targetC });
+            const piece = boardState[r][c];
+            if (!piece) return moves;
+            const isWhite = piece === piece.toUpperCase();
+            const type = piece.toLowerCase();
+
+            if (type === 'p') {
+                const dir = isWhite ? -1 : 1;
+                const startRow = isWhite ? 6 : 1;
+                
+                if (r + dir >= 0 && r + dir < 8 && !boardState[r + dir][c]) {
+                    moves.push({ r: r + dir, c });
+                    if (r === startRow && !boardState[r + 2 * dir][c]) {
+                        moves.push({ r: r + 2 * dir, c });
+                    }
                 }
-            });
+                [-1, 1].forEach(dc => {
+                    const targetR = r + dir;
+                    const targetC = c + dc;
+                    if (targetR >= 0 && targetR < 8 && targetC >= 0 && targetC < 8) {
+                        const target = boardState[targetR][targetC];
+                        if (target && (target === target.toUpperCase()) !== isWhite) {
+                            moves.push({ r: targetR, c: targetC });
+                        }
+                    }
+                });
+            }
+
+            if (type === 'r' || type === 'q') {
+                const dirs = [{r:1,c:0}, {r:-1,c:0}, {r:0,c:1}, {r:0,c:-1}];
+                dirs.forEach(d => {
+                    let steps = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + d.r * steps, c + d.c * steps, isWhite);
+                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps });
+                        if (res.stop) break;
+                        steps++;
+                    }
+                });
+            }
+
+            if (type === 'b' || type === 'q') {
+                const dirs = [{r:1,c:1}, {r:1,c:-1}, {r:-1,c:1}, {r:-1,c:-1}];
+                dirs.forEach(d => {
+                    let steps = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + d.r * steps, c + d.c * steps, isWhite);
+                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps });
+                        if (res.stop) break;
+                        steps++;
+                    }
+                });
+            }
+
+            if (type === 'n') {
+                const jumps = [
+                    {r:2,c:1}, {r:2,c:-1}, {r:-2,c:1}, {r:-2,c:-1},
+                    {r:1,c:2}, {r:1,c:-2}, {r:-1,c:2}, {r:-1,c:-2}
+                ];
+                jumps.forEach(j => {
+                    const res = isEnemyOrEmpty(r + j.r, c + j.c, isWhite);
+                    if (res.valid) moves.push({ r: r + j.r, c: c + j.c });
+                });
+            }
+
+            if (type === 'k') {
+                const steps = [
+                    {r:1,c:0}, {r:-1,c:0}, {r:0,c:1}, {r:0,c:-1},
+                    {r:1,c:1}, {r:1,c:-1}, {r:-1,c:1}, {r:-1,c:-1}
+                ];
+                steps.forEach(s => {
+                    const res = isEnemyOrEmpty(r + s.r, c + s.c, isWhite);
+                    if (res.valid) moves.push({ r: r + s.r, c: c + s.c });
+                });
+            }
+
             return moves;
         }
 
@@ -233,7 +304,7 @@
                 for (let c = 0; c < 8; c++) {
                     const piece = boardState[r][c];
                     if (piece && piece === piece.toLowerCase()) {
-                        const moves = getBasicMoves(r, c);
+                        const moves = getRealChessMoves(r, c);
                         moves.forEach(m => allMoves.push({ fromR: r, fromC: c, toR: m.r, toC: m.c }));
                     }
                 }
