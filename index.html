@@ -186,13 +186,7 @@
         };
         let enPassantTarget = null;
 
-        const boardElement = document.getElementById("board");
-        const statusElement = document.getElementById("status");
-        const gameOverScreen = document.getElementById("game-over-screen");
-        const winnerText = document.getElementById("winner-text");
-        const onlinePanel = document.getElementById("online-panel");
-        const myIdDisplay = document.getElementById("my-id");
-        const connStatusDisplay = document.getElementById("connection-status");
+        let boardElement, statusElement, gameOverScreen, winnerText, onlinePanel, myIdDisplay, connStatusDisplay;
 
         function initPeerJS() {
             if (peer) return;
@@ -232,6 +226,7 @@
         }
 
         function createBoard() {
+            if (!boardElement) return;
             boardElement.innerHTML = "";
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
@@ -239,10 +234,10 @@
                     square.classList.add("square");
                     square.classList.add((r + c) % 2 === 0 ? "light" : "dark");
                     
-                    const piece = boardState[r][c];
+                    const piece = boardState[r] ? boardState[r][c] : '';
                     if (piece) {
                         const img = document.createElement("img");
-                        img.src = imageMap[piece];
+                        img.src = imageMap[piece] || '';
                         square.appendChild(img);
                     }
                     
@@ -352,6 +347,7 @@
 
         function getRawMoves(r, c, state, includeSpecial) {
             const moves = [];
+            if (r < 0 || r >= 8 || c < 0 || c >= 8) return moves;
             const piece = state[r][c];
             if (!piece) return moves;
             
@@ -360,157 +356,5 @@
 
             if (type === 'p') {
                 const dir = isWhite ? -1 : 1;
-                const nextRow = r + dir;
-                if (nextRow >= 0 && nextRow < 8 && !state[nextRow][c]) {
-                    moves.push({ r: nextRow, c: c, type: "normal" });
-                    const startRow = isWhite ? 6 : 1;
-                    if (r === startRow && !state[r + 2 * dir][c]) {
-                        moves.push({ r: r + 2 * dir, c: c, type: "normal" });
-                    }
-                }
-                [-1, 1].forEach(dc => {
-                    const tc = c + dc;
-                    if (tc >= 0 && tc < 8 && nextRow >= 0 && nextRow < 8) {
-                        const t = state[nextRow][tc];
-                        if (t && (t === t.toUpperCase()) !== isWhite) {
-                            moves.push({ r: nextRow, c: tc, type: "normal" });
-                        }
-                        if (includeSpecial && enPassantTarget && enPassantTarget.r === nextRow && enPassantTarget.c === tc) {
-                            moves.push({ r: nextRow, c: tc, type: "en-passant" });
-                        }
-                    }
-                });
-            }
-            
-            if (type === 'r' || type === 'q') {
-                const dirs = [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1}];
-                dirs.forEach(d => {
-                    let s = 1;
-                    while (true) {
-                        const res = isEnemyOrEmpty(r + d.r * s, c + d.c * s, isWhite, state);
-                        if (res.valid) moves.push({ r: r + d.r * s, c: c + d.c * s, type: "normal" });
-                        if (res.stop) break;
-                        s++;
-                    }
-                });
-            }
-            
-            if (type === 'b' || type === 'q') {
-                const dirs = [{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
-                dirs.forEach(d => {
-                    let s = 1;
-                    while (true) {
-                        const res = isEnemyOrEmpty(r + d.r * s, c + d.c * s, isWhite, state);
-                        if (res.valid) moves.push({ r: r + d.r * s, c: c + d.c * s, type: "normal" });
-                        if (res.stop) break;
-                        s++;
-                    }
-                });
-            }
-            
-            if (type === 'n') {
-                const jumps = [{r:2,c:1},{r:2,c:-1},{r:-2,c:1},{r:-2,c:-1},{r:1,c:2},{r:1,c:-2},{r:-1,c:2},{r:-1,c:-2}];
-                jumps.forEach(j => {
-                    const res = isEnemyOrEmpty(r + j.r, c + j.c, isWhite, state);
-                    if (res.valid) moves.push({ r: r + j.r, c: c + j.c, type: "normal" });
-                });
-            }
-            
-            if (type === 'k') {
-                const steps = [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1},{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
-                steps.forEach(s => {
-                    const res = isEnemyOrEmpty(r + s.r, c + s.c, isWhite, state);
-                    if (res.valid) moves.push({ r: r + s.r, c: c + s.c, type: "normal" });
-                });
+                const nextRow
                 
-                if (includeSpecial && !isInCheck(isWhite ? "W" : "B")) {
-                    if (isWhite && !hasMoved.whiteKing) {
-                        if (!hasMoved.whiteRookH && !state[7][5] && !state[7][6] && isSquareSafe(7, 5, "W") && isSquareSafe(7, 6, "W")) {
-                            moves.push({ r: 7, c: 6, type: "castle-kingside" });
-                        }
-                        if (!hasMoved.whiteRookA && !state[7][1] && !state[7][2] && !state[7][3] && isSquareSafe(7, 2, "W") && isSquareSafe(7, 3, "W")) {
-                            moves.push({ r: 7, c: 2, type: "castle-queenside" });
-                        }
-                    } else if (!isWhite && !hasMoved.blackKing) {
-                        if (!hasMoved.blackRookH && !state[0][5] && !state[0][6] && isSquareSafe(0, 5, "B") && isSquareSafe(0, 6, "B")) {
-                            moves.push({ r: 0, c: 6, type: "castle-kingside" });
-                        }
-                        if (!hasMoved.blackRookA && !state[0][1] && !state[0][2] && !state[0][3] && isSquareSafe(0, 2, "B") && isSquareSafe(0, 3, "B")) {
-                            moves.push({ r: 0, c: 2, type: "castle-queenside" });
-                        }
-                    }
-                }
-            }
-            return moves;
-        }
-
-        function getFilteredLegalMoves(r, c) {
-            const rawMoves = getRawMoves(r, c, boardState, true);
-            const piece = boardState[r][c];
-            const isWhite = piece === piece.toUpperCase();
-            
-            return rawMoves.filter(m => {
-                const originalTarget = boardState[m.r][m.c];
-                const originalPawn = m.type === "en-passant" ? boardState[r][m.c] : null;
-                
-                if (m.type === "en-passant") boardState[r][m.c] = '';
-                boardState[m.r][m.c] = boardState[r][c];
-                boardState[r][c] = '';
-                
-                const safe = !isInCheck(isWhite ? "W" : "B");
-                
-                boardState[r][c] = boardState[m.r][m.c];
-                boardState[m.r][m.c] = originalTarget;
-                if (m.type === "en-passant") boardState[r][m.c] = originalPawn;
-                
-                return safe;
-            });
-        }
-
-        function isSquareSafe(r, c, side) {
-            for (let tr = 0; tr < 8; tr++) {
-                for (let tc = 0; tc < 8; tc++) {
-                    const p = boardState[tr][tc];
-                    if (p) {
-                        const isWhitePiece = p === p.toUpperCase();
-                        if ((side === "W" && !isWhitePiece) || (side === "B" && isWhitePiece)) {
-                            const raw = getRawMoves(tr, tc, boardState, false);
-                            if (raw.some(m => m.r === r && m.c === c)) return false;
-                        }
-                    }
-                }
-            }
-            return true;
-        }
-
-        function isInCheck(side) {
-            let kingPos = null;
-            const tk = side === "W" ? "K" : "k";
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    if (boardState[r][c] === tk) {
-                        kingPos = { r, c };
-                        break;
-                    }
-                }
-                if (kingPos) break;
-            }
-            return kingPos ? !isSquareSafe(kingPos.r, kingPos.c, side) : false;
-        }
-
-        function hasNoLegalMoves(side) {
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const p = boardState[r][c];
-                    if (p) {
-                        const isWhitePiece = p === p.toUpperCase();
-                        if ((side === "W" && isWhitePiece) || (side === "B" && !isWhitePiece)) {
-                            if (getFilteredLegalMoves(r, c).length > 0) return false;
-                        }
-                    }
-                }
-            }
-            return true;
-        }
-
-        function
