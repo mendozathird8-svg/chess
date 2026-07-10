@@ -192,13 +192,13 @@
             if (peer) return;
             peer = new Peer();
             peer.on('open', function(id) {
-                myIdDisplay.innerText = id;
+                if(myIdDisplay) myIdDisplay.innerText = id;
             });
             peer.on('connection', function(c) {
                 conn = c;
                 myColor = "W";
                 setupConnectionListeners();
-                connStatusDisplay.innerText = "Connected! Playing White.";
+                if(connStatusDisplay) connStatusDisplay.innerText = "Connected! Playing White.";
             });
         }
 
@@ -212,7 +212,7 @@
 
         function setupConnectionListeners() {
             conn.on('open', function() {
-                connStatusDisplay.innerText = "Connected! Playing Black.";
+                if(connStatusDisplay) connStatusDisplay.innerText = "Connected! Playing Black.";
                 resetGame(false);
             });
             conn.on('data', function(data) {
@@ -309,7 +309,7 @@
                 boardState[fromR][fromC] = '';
             }
 
-            if (piece.toLowerCase() === 'p' && Math.abs(toR - fromR) === 2) {
+            if (piece && piece.toLowerCase() === 'p' && Math.abs(toR - fromR) === 2) {
                 enPassantTarget = { r: (fromR + toR) / 2, c: fromC };
             } else {
                 enPassantTarget = null;
@@ -330,12 +330,12 @@
             
             if (hasNoLegalMoves(turn)) {
                 isGameOver = true;
-                gameOverScreen.style.display = "flex";
-                winnerText.innerText = isInCheck(turn) ? (turn === "W" ? "Black Wins!" : "White Wins!") : "Draw!";
+                if(gameOverScreen) gameOverScreen.style.display = "flex";
+                if(winnerText) winnerText.innerText = isInCheck(turn) ? (turn === "W" ? "Black Wins!" : "White Wins!") : "Draw!";
                 return;
             }
             
-            statusElement.innerText = isInCheck(turn) ? "CHECK!" : (turn === "W" ? "White's Turn" : "Black's Turn");
+            if(statusElement) statusElement.innerText = isInCheck(turn) ? "CHECK!" : (turn === "W" ? "White's Turn" : "Black's Turn");
         }
 
         function isEnemyOrEmpty(r, c, isWhite, state) {
@@ -356,5 +356,153 @@
 
             if (type === 'p') {
                 const dir = isWhite ? -1 : 1;
-                const nextRow
+                const nextRow = r + dir;
+                if (nextRow >= 0 && nextRow < 8 && !state[nextRow][c]) {
+                    moves.push({ r: nextRow, c: c, type: "normal" });
+                    const startRow = isWhite ? 6 : 1;
+                    if (r === startRow && !state[r + 2 * dir][c]) {
+                        moves.push({ r: r + 2 * dir, c: c, type: "normal" });
+                    }
+                }
+                const attackCols = [c - 1, c + 1];
+                for (let i = 0; i < 2; i++) {
+                    const tc = attackCols[i];
+                    if (tc >= 0 && tc < 8 && nextRow >= 0 && nextRow < 8) {
+                        const t = state[nextRow][tc];
+                        if (t && (t === t.toUpperCase()) !== isWhite) {
+                            moves.push({ r: nextRow, c: tc, type: "normal" });
+                        }
+                        if (includeSpecial && enPassantTarget && enPassantTarget.r === nextRow && enPassantTarget.c === tc) {
+                            moves.push({ r: nextRow, c: tc, type: "en-passant" });
+                        }
+                    }
+                }
+            }
+            
+            if (type === 'r' || type === 'q') {
+                const dirs = [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1}];
+                for (let d = 0; d < 4; d++) {
+                    let s = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + dirs[d].r * s, c + dirs[d].c * s, isWhite, state);
+                        if (res.valid) moves.push({ r: r + dirs[d].r * s, c: c + dirs[d].c * s, type: "normal" });
+                        if (res.stop) break;
+                        s++;
+                    }
+                }
+            }
+            
+            if (type === 'b' || type === 'q') {
+                const dirs = [{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
+                for (let d = 0; d < 4; d++) {
+                    let s = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + dirs[d].r * s, c + dirs[d].c * s, isWhite, state);
+                        if (res.valid) moves.push({ r: r + dirs[d].r * s, c: c + dirs[d].c * s, type: "normal" });
+                        if (res.stop) break;
+                        s++;
+                    }
+                }
+            }
+            
+            if (type === 'n') {
+                const jumps = [{r:2,c:1},{r:2,c:-1},{r:-2,c:1},{r:-2,c:-1},{r:1,c:2},{r:1,c:-2},{r:-1,c:2},{r:-1,c:-2}];
+                for (let j = 0; j < 8; j++) {
+                    const res = isEnemyOrEmpty(r + jumps[j].r, c + jumps[j].c, isWhite, state);
+                    if (res.valid) moves.push({ r: r + jumps[j].r, c: c + jumps[j].c, type: "normal" });
+                }
+            }
+            
+            if (type === 'k') {
+                const steps = [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1},{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
+                for (let s = 0; s < 8; s++) {
+                    const res = isEnemyOrEmpty(r + steps[s].r, c + steps[s].c, isWhite, state);
+                    if (res.valid) moves.push({ r: r + steps[s].r, c: c + steps[s].c, type: "normal" });
+                }
                 
+                if (includeSpecial) {
+                    if (isWhite && !hasMoved.whiteKing) {
+                        if (!hasMoved.whiteRookH && !state[7][5] && !state[7][6] && isSquareSafe(7, 5, "W") && isSquareSafe(7, 6, "W")) {
+                            moves.push({ r: 7, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.whiteRookA && !state[7][1] && !state[7][2] && !state[7][3] && isSquareSafe(7, 2, "W") && isSquareSafe(7, 3, "W")) {
+                            moves.push({ r: 7, c: 2, type: "castle-queenside" });
+                        }
+                    } else if (!isWhite && !hasMoved.blackKing) {
+                        if (!hasMoved.blackRookH && !state[0][5] && !state[0][6] && isSquareSafe(0, 5, "B") && isSquareSafe(0, 6, "B")) {
+                            moves.push({ r: 0, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.blackRookA && !state[0][1] && !state[0][2] && !state[0][3] && isSquareSafe(0, 2, "B") && isSquareSafe(0, 3, "B")) {
+                            moves.push({ r: 0, c: 2, type: "castle-queenside" });
+                        }
+                    }
+                }
+            }
+            return moves;
+        }
+
+        function getFilteredLegalMoves(r, c) {
+            const piece = boardState[r][c];
+            if (!piece) return [];
+            const isWhite = piece === piece.toUpperCase();
+            const rawMoves = getRawMoves(r, c, boardState, true);
+            
+            return rawMoves.filter(m => {
+                const originalTarget = boardState[m.r][m.c];
+                const originalPawn = m.type === "en-passant" ? boardState[r][m.c] : null;
+                
+                if (m.type === "en-passant") boardState[r][m.c] = '';
+                boardState[m.r][m.c] = boardState[r][c];
+                boardState[r][c] = '';
+                
+                const safe = !isInCheck(isWhite ? "W" : "B");
+                
+                boardState[r][c] = boardState[m.r][m.c];
+                boardState[m.r][m.c] = originalTarget;
+                if (m.type === "en-passant") boardState[r][m.c] = originalPawn;
+                
+                return safe;
+            });
+        }
+
+        function isSquareSafe(r, c, side) {
+            for (let tr = 0; tr < 8; tr++) {
+                for (let tc = 0; tc < 8; tc++) {
+                    const p = boardState[tr][tc];
+                    if (p) {
+                        const isWhitePiece = p === p.toUpperCase();
+                        if ((side === "W" && !isWhitePiece) || (side === "B" && isWhitePiece)) {
+                            const raw = getRawMoves(tr, tc, boardState, false);
+                            if (raw.some(m => m.r === r && m.c === c)) return false;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        function isInCheck(side) {
+            let kingPos = null;
+            const tk = side === "W" ? "K" : "k";
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if (boardState[r][c] === tk) {
+                        kingPos = { r: r, c: c };
+                        break;
+                    }
+                }
+                if (kingPos) break;
+            }
+            return kingPos ? !isSquareSafe(kingPos.r, kingPos.c, side) : false;
+        }
+
+        function hasNoLegalMoves(side) {
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const p = boardState[r][c];
+                    if (p) {
+                        const isWhitePiece = p === p.toUpperCase();
+                        if ((side === "W" && isWhitePiece) || (side === "B" && !isWhitePiece)) {
+                            if (getFilteredLegalMoves(r, c).length > 0) return false;
+                        }
+                   
