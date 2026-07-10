@@ -107,12 +107,444 @@
             max-width: 400px;
             aspect-ratio: 1 / 1;
             margin: 0 auto;
-            border: 2px solid #333; /* Added a minor baseline border layout */
+            border: 4px solid #333;
             box-sizing: border-box;
+            background-color: #b58863;
+        }
+
+        .square {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+
+        .light {
+            background-color: #f0d9b5;
+        }
+
+        .dark {
+            background-color: #b58863;
+        }
+
+        .square img {
+            width: 90%;
+            height: 90%;
+            object-fit: contain;
+            pointer-events: none;
+        }
+
+        .selected {
+            background-color: #7b9ec2 !important;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            background-color: #00bcd4;
+            border-radius: 50%;
+            position: absolute;
+            z-index: 10;
+        }
+
+        #game-over-screen {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            z-index: 100;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+        }
+
+        #game-over-screen h2 {
+            font-size: 28px;
+            color: #00bcd4;
+            margin-bottom: 20px;
+            text-align: center;
+            padding: 0 10px;
+        }
+
+        #game-over-screen button {
+            background-color: #00bcd4;
+            color: #000;
+            font-size: 18px;
+            padding: 12px 25px;
         }
     </style>
 </head>
 <body>
-    <!-- Rest of your body elements and scripts should follow here -->
-</body>
-</html>
+
+    <div class="controls">
+        <button id="mode-2p" class="active" onclick="setMode('2P')">2 Player</button>
+        <button id="mode-bot" onclick="setMode('Bot')">Play vs Bot</button>
+        <button id="mode-online" onclick="setMode('Online')">Play Online</button>
+        <button class="reset-btn" onclick="resetGame()">Reset</button>
+    </div>
+
+    <!-- PeerJS Connection Panel -->
+    <div id="online-panel" class="online-panel">
+        <div>Your Lobby ID (Tap to Copy):</div>
+        <div id="my-id" class="id-display">Connecting to PeerJS...</div>
+        <div style="margin-top: 10px;">
+            <input type="text" id="peer-id-input" placeholder="Paste Friend's ID here">
+            <button onclick="connectToFriend()">Join</button>
+        </div>
+        <div id="connection-status" style="margin-top: 10px; font-size: 14px; color: #aaa;"></div>
+    </div>
+
+    <div id="status">White's Turn</div>
+    
+    <div id="board-container">
+        <div id="board"></div>
+        <div id="game-over-screen">
+            <h2 id="winner-text">Checkmate!</h2>
+            <button onclick="resetGame()">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        const imageMap = {
+            'P': 'P.jpg',  'R': 'R.jpg',  'N': 'N.jpg',  'B': 'B.jpg',  'Q': 'Q.jpg',  'K': 'K.jpg',
+            'p': 'Bp.jpg', 'r': 'Br.jpg', 'n': 'Bn.jpg', 'b': 'BB.jpg', 'q': 'Bq.jpg', 'k': 'Bk.jpg'
+        };
+
+        let boardState = [];
+        let turn = "W";
+        let selectedSquare = null;
+        let validMoves = [];
+        let gameMode = "2P";
+        let isGameOver = false;
+
+        let peer = null;
+        let conn = null;
+        let myColor = "W";
+
+        let hasMoved = {
+            'whiteKing': false, 'whiteRookA': false, 'whiteRookH': false,
+            'blackKing': false, 'blackRookA': false, 'blackRookH': false
+        };
+        let enPassantTarget = null;
+
+        const boardElement = document.getElementById("board");
+        const statusElement = document.getElementById("status");
+        const gameOverScreen = document.getElementById("game-over-screen");
+        const winnerText = document.getElementById("winner-text");
+        const onlinePanel = document.getElementById("online-panel");
+        const myIdDisplay = document.getElementById("my-id");
+        const connStatusDisplay = document.getElementById("connection-status");
+
+        function initPeerJS() {
+            if (peer) return;
+            peer = new Peer();
+
+            peer.on('open', (id) => {
+                myIdDisplay.innerText = id;
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                myColor = "W";
+                setupConnectionListeners();
+                connStatusDisplay.innerText = "Connected! You are playing White.";
+            });
+
+            myIdDisplay.addEventListener('click', () => {
+                navigator.clipboard.writeText(myIdDisplay.innerText);
+                alert("Lobby ID copied to clipboard!");
+            });
+        }
+
+        function connectToFriend() {
+            const friendId = document.getElementById("peer-id-input").value.trim();
+            if (!friendId) return;
+
+            connStatusDisplay.innerText = "Connecting...";
+            conn = peer.connect(friendId);
+            myColor = "B";
+            setupConnectionListeners();
+        }
+
+        function setupConnectionListeners() {
+            conn.on('open', () => {
+                connStatusDisplay.innerText = "Connected! You are playing Black.";
+                resetGame();
+            });
+
+            conn.on('data', (data) => {
+                if (data.type === 'move') {
+                    movePiece(data.fromR, data.fromC, data.toR, data.toC, data.moveType, false);
+                    createBoard();
+                } else if (data.type === 'reset') {
+                    resetGame(false);
+                }
+            });
+
+            conn.on('close', () => {
+                connStatusDisplay.innerText = "Friend disconnected.";
+                conn = null;
+            });
+        }
+
+        function createBoard() {
+            boardElement.innerHTML = "";
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const square = document.createElement("div");
+                    square.classList.add("square");
+                    square.classList.add((r + c) % 2 === 0 ? "light" : "dark");
+                    
+                    const piece = boardState[r][c];
+                    if (piece && imageMap[piece]) {
+                        const img = document.createElement("img");
+                        img.src = imageMap[piece];
+                        square.appendChild(img);
+                    }
+
+                    if (selectedSquare && selectedSquare.r === r && selectedSquare.c === c) {
+                        square.classList.add("selected");
+                    }
+
+                    if (validMoves.some(m => m.r === r && m.c === c)) {
+                        const dot = document.createElement("div");
+                        dot.classList.add("dot");
+                        square.appendChild(dot);
+                    }
+
+                    square.addEventListener("click", () => handleSquareClick(r, c));
+                    boardElement.appendChild(square);
+                }
+            }
+        }
+
+        function handleSquareClick(r, c) {
+            if (isGameOver) return;
+            if (gameMode === "Bot" && turn === "B") return;
+            
+            if (gameMode === "Online") {
+                if (!conn) return; 
+                if (turn !== myColor) return; 
+            }
+
+            const piece = boardState[r][c];
+            const isWhite = piece && piece === piece.toUpperCase();
+            const targetMove = validMoves.find(m => m.r === r && m.c === c);
+
+            if (selectedSquare && targetMove) {
+                movePiece(selectedSquare.r, selectedSquare.c, r, c, targetMove.type, true);
+                selectedSquare = null;
+                validMoves = [];
+                createBoard();
+                
+                if (!isGameOver && gameMode === "Bot" && turn === "B") {
+                    setTimeout(makeBotMove, 500);
+                }
+                return;
+            }
+
+            if (piece && ((turn === "W" && isWhite) || (turn === "B" && !isWhite))) {
+                selectedSquare = { r, c };
+                validMoves = getFilteredLegalMoves(r, c);
+            } else {
+                selectedSquare = null;
+                validMoves = [];
+            }
+            createBoard();
+        }
+
+        function movePiece(fromR, fromC, toR, toC, moveType = "normal", sendNetwork = true) {
+            const piece = boardState[fromR][fromC];
+            
+            if (moveType === "castle-kingside") {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[toR][5] = boardState[toR][7];
+                boardState[toR][7] = '';
+            } else if (moveType === "castle-queenside") {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[toR][3] = boardState[toR][0];
+                boardState[toR][0] = '';
+            } else if (moveType === "en-passant") {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[fromR][toC] = '';
+            } else {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+            }
+
+            if (piece.toLowerCase() === 'p' && Math.abs(toR - fromR) === 2) {
+                enPassantTarget = { r: (fromR + toR) / 2, c: fromC };
+            } else {
+                enPassantTarget = null;
+            }
+
+            if (fromR === 7 && fromC === 4) hasMoved.whiteKing = true;
+            if (fromR === 7 && fromC === 0) hasMoved.whiteRookA = true;
+            if (fromR === 7 && fromC === 7) hasMoved.whiteRookH = true;
+            if (fromR === 0 && fromC === 4) hasMoved.blackKing = true;
+            if (fromR === 0 && fromC === 0) hasMoved.blackRookA = true;
+            if (fromR === 0 && fromC === 7) hasMoved.blackRookH = true;
+
+            if (sendNetwork && gameMode === "Online" && conn) {
+                conn.send({ type: 'move', fromR, fromC, toR, toC, moveType });
+            }
+
+            turn = turn === "W" ? "B" : "W";
+            
+            if (hasNoLegalMoves(turn)) {
+                isGameOver = true;
+                gameOverScreen.style.display = "flex";
+                if (isInCheck(turn)) {
+                    winnerText.innerText = turn === "W" ? "🏆 Black Wins by Checkmate!" : "🏆 White Wins by Checkmate!";
+                } else {
+                    winnerText.innerText = "🤝 Draw by Stalemate!";
+                }
+                return;
+            }
+
+            if (isInCheck(turn)) {
+                statusElement.innerText = turn === "W" ? "White is in CHECK!" : "Black is in CHECK!";
+            } else {
+                statusElement.innerText = turn === "W" ? "White's Turn" : "Black's Turn";
+            }
+        }
+
+        function isEnemyOrEmpty(r, c, isWhite, state = boardState) {
+            if (r < 0 || r >= 8 || c < 0 || c >= 8) return { valid: false, stop: true };
+            const target = state[r][c];
+            if (!target) return { valid: true, stop: false };
+            const targetIsWhite = target === target.toUpperCase();
+            if (isWhite !== targetIsWhite) return { valid: true, stop: true };
+            return { valid: false, stop: true };
+        }
+
+        function getRawMoves(r, c, state = boardState, includeSpecial = true) {
+            const moves = [];
+            const piece = state[r][c];
+            if (!piece) return moves;
+            const isWhite = piece === piece.toUpperCase();
+            const type = piece.toLowerCase();
+
+            if (type === 'p') {
+                const dir = isWhite ? -1 : 1;
+                const startRow = isWhite ? 6 : 1;
+                
+                if (r + dir >= 0 && r + dir < 8 && !state[r + dir][c]) {
+                    moves.push({ r: r + dir, c: c, type: "normal" });
+                    if (r === startRow && !state[r + 2 * dir][c]) {
+                        moves.push({ r: r + 2 * dir, c: c, type: "normal" });
+                    }
+                }
+                [-1, 1].forEach(dc => {
+                    const targetR = r + dir;
+                    const targetC = c + dc;
+                    if (targetR >= 0 && targetR < 8 && targetC >= 0 && targetC < 8) {
+                        const target = state[targetR][targetC];
+                        if (target && (target === target.toUpperCase()) !== isWhite) {
+                            moves.push({ r: targetR, c: targetC, type: "normal" });
+                        }
+                        if (includeSpecial && enPassantTarget && enPassantTarget.r === targetR && enPassantTarget.c === targetC) {
+                            moves.push({ r: targetR, c: targetC, type: "en-passant" });
+                        }
+                    }
+                });
+            }
+
+            if (type === 'r' || type === 'q') {
+                const dirs = [{r:1,c:0}, {r:-1,c:0}, {r:0,c:1}, {r:0,c:-1}];
+                dirs.forEach(d => {
+                    let steps = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + d.r * steps, c + d.c * steps, isWhite, state);
+                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps, type: "normal" });
+                        if (res.stop) break;
+                        steps++;
+                    }
+                });
+            }
+
+            if (type === 'b' || type === 'q') {
+                const dirs = [{r:1,c:1}, {r:1,c:-1}, {r:-1,c:1}, {r:-1,c:-1}];
+                dirs.forEach(d => {
+                    let steps = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + d.r * steps, c + d.c * steps, isWhite, state);
+                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps, type: "normal" });
+                        if (res.stop) break;
+                        steps++;
+                    }
+                });
+            }
+
+            if (type === 'n') {
+                const jumps = [
+                    {r:2,c:1}, {r:2,c:-1}, {r:-2,c:1}, {r:-2,c:-1},
+                    {r:1,c:2}, {r:1,c:-2}, {r:-1,c:2}, {r:-1,c:-2}
+                ];
+                jumps.forEach(j => {
+                    const res = isEnemyOrEmpty(r + j.r, c + j.c, isWhite, state);
+                    if (res.valid) moves.push({ r: r + j.r, c: c + j.c, type: "normal" });
+                });
+            }
+
+            if (type === 'k') {
+                const steps = [
+                    {r:1,c:0}, {r:-1,c:0}, {r:0,c:1}, {r:0,c:-1},
+                    {r:1,c:1}, {r:1,c:-1}, {r:-1,c:1}, {r:-1,c:-1}
+                ];
+                steps.forEach(s => {
+                    const res = isEnemyOrEmpty(r + s.r, c + s.c, isWhite, state);
+                    if (res.valid) moves.push({ r: r + s.r, c: c + s.c, type: "normal" });
+                });
+
+                if (includeSpecial && !isInCheck(isWhite ? "W" : "B")) {
+                    if (isWhite && !hasMoved.whiteKing) {
+                        if (!hasMoved.whiteRookH && !state[7][5] && !state[7][6] && isSquareSafe(7, 5, "W") && isSquareSafe(7, 6, "W")) {
+                            moves.push({ r: 7, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.whiteRookA && !state[7][1] && !state[7][2] && !state[7][3] && isSquareSafe(7, 2, "W") && isSquareSafe(7, 3, "W")) {
+                            moves.push({ r: 7, c: 2, type: "castle-queenside" });
+                        }
+                    } else if (!isWhite && !hasMoved.blackKing) {
+                        if (!hasMoved.blackRookH && !state[0][5] && !state[0][6] && isSquareSafe(0, 5, "B") && isSquareSafe(0, 6, "B")) {
+                            moves.push({ r: 0, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.blackRookA && !state[0][1] && !state[0][2] && !state[0][3] && isSquareSafe(0, 2, "B") && isSquareSafe(0, 3, "B")) {
+                            moves.push({ r: 0, c: 2, type: "castle-queenside" });
+                        }
+                    }
+                }
+            }
+
+            return moves;
+        }
+
+        function getFilteredLegalMoves(r, c) {
+            const rawMoves = getRawMoves(r, c, boardState, true);
+            const piece = boardState[r][c];
+            const isWhite = piece === piece.toUpperCase();
+            const side = isWhite ? "W" : "B";
+
+            return rawMoves.filter(m => {
+                const originalTarget = boardState[m.r][m.c];
+                const originalPawn = m.type === "en-passant" ? boardState[r][m.c] : null;
+
+                if (m.type === "en-passant") boardState[r][m.c] = '';
+                boardState[m.r][m.c] = boardState[r][c];
+                boardState[r][c] = '';
+                
+                const safe = !isInCheck(side);
+
+                boardState[r][c] = boardState[m.r][m.c];
+                boardState[m.r][m.c] = originalTarget;
+                if (m.type === "en-passant") boardState[r][
