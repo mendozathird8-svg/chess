@@ -141,7 +141,7 @@
         <button id="mode-2p" class="active" onclick="setMode('2P')">2 Player</button>
         <button id="mode-bot" onclick="setMode('Bot')">Play vs Bot</button>
         <button id="mode-online" onclick="setMode('Online')">Play Online</button>
-        <button class="reset-btn" onclick="resetGame()">Reset</button>
+        <button class="reset-btn" onclick="resetGame(true)">Reset</button>
     </div>
 
     <div id="online-panel" class="online-panel">
@@ -160,7 +160,7 @@
         <div id="board"></div>
         <div id="game-over-screen">
             <h2 id="winner-text">Checkmate!</h2>
-            <button onclick="resetGame()">Play Again</button>
+            <button onclick="resetGame(true)">Play Again</button>
         </div>
     </div>
 
@@ -176,7 +176,9 @@
         let validMoves = [];
         let gameMode = "2P";
         let isGameOver = false;
-        let peer = null, conn = null, myColor = "W";
+        let peer = null;
+        let conn = null;
+        let myColor = "W";
 
         let hasMoved = {
             'whiteKing': false, 'whiteRookA': false, 'whiteRookH': false,
@@ -195,9 +197,13 @@
         function initPeerJS() {
             if (peer) return;
             peer = new Peer();
-            peer.on('open', id => myIdDisplay.innerText = id);
-            peer.on('connection', c => {
-                conn = c; myColor = "W"; setupConnectionListeners();
+            peer.on('open', function(id) {
+                myIdDisplay.innerText = id;
+            });
+            peer.on('connection', function(c) {
+                conn = c;
+                myColor = "W";
+                setupConnectionListeners();
                 connStatusDisplay.innerText = "Connected! Playing White.";
             });
         }
@@ -205,14 +211,23 @@
         function connectToFriend() {
             const friendId = document.getElementById("peer-id-input").value.trim();
             if (!friendId) return;
-            conn = peer.connect(friendId); myColor = "B"; setupConnectionListeners();
+            conn = peer.connect(friendId);
+            myColor = "B";
+            setupConnectionListeners();
         }
 
         function setupConnectionListeners() {
-            conn.on('open', () => { connStatusDisplay.innerText = "Connected! Playing Black."; resetGame(); });
-            conn.on('data', data => {
-                if (data.type === 'move') { movePiece(data.fromR, data.fromC, data.toR, data.toC, data.moveType, false); createBoard(); }
-                else if (data.type === 'reset') { resetGame(false); }
+            conn.on('open', function() {
+                connStatusDisplay.innerText = "Connected! Playing Black.";
+                resetGame(false);
+            });
+            conn.on('data', function(data) {
+                if (data.type === 'move') {
+                    movePiece(data.fromR, data.fromC, data.toR, data.toC, data.moveType, false);
+                    createBoard();
+                } else if (data.type === 'reset') {
+                    resetGame(false);
+                }
             });
         }
 
@@ -221,19 +236,26 @@
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     const square = document.createElement("div");
-                    square.classList.add("square", (r + c) % 2 === 0 ? "light" : "dark");
+                    square.classList.add("square");
+                    square.classList.add((r + c) % 2 === 0 ? "light" : "dark");
+                    
                     const piece = boardState[r][c];
                     if (piece) {
                         const img = document.createElement("img");
                         img.src = imageMap[piece];
                         square.appendChild(img);
                     }
-                    if (selectedSquare && selectedSquare.r === r && selectedSquare.c === c) square.classList.add("selected");
+                    
+                    if (selectedSquare && selectedSquare.r === r && selectedSquare.c === c) {
+                        square.classList.add("selected");
+                    }
+                    
                     if (validMoves.some(m => m.r === r && m.c === c)) {
                         const dot = document.createElement("div");
                         dot.classList.add("dot");
                         square.appendChild(dot);
                     }
+                    
                     square.addEventListener("click", () => handleSquareClick(r, c));
                     boardElement.appendChild(square);
                 }
@@ -241,7 +263,8 @@
         }
 
         function handleSquareClick(r, c) {
-            if (isGameOver || (gameMode === "Bot" && turn === "B")) return;
+            if (isGameOver) return;
+            if (gameMode === "Bot" && turn === "B") return;
             if (gameMode === "Online" && turn !== myColor) return;
 
             const piece = boardState[r][c];
@@ -250,34 +273,52 @@
 
             if (selectedSquare && targetMove) {
                 movePiece(selectedSquare.r, selectedSquare.c, r, c, targetMove.type, true);
-                selectedSquare = null; validMoves = []; createBoard();
-                if (!isGameOver && gameMode === "Bot" && turn === "B") setTimeout(makeBotMove, 400);
+                selectedSquare = null;
+                validMoves = [];
+                createBoard();
+                if (!isGameOver && gameMode === "Bot" && turn === "B") {
+                    setTimeout(makeBotMove, 400);
+                }
                 return;
             }
 
             if (piece && ((turn === "W" && isWhite) || (turn === "B" && !isWhite))) {
-                selectedSquare = { r, c }; validMoves = getFilteredLegalMoves(r, c);
+                selectedSquare = { r, c };
+                validMoves = getFilteredLegalMoves(r, c);
             } else {
-                selectedSquare = null; validMoves = [];
+                selectedSquare = null;
+                validMoves = [];
             }
             createBoard();
         }
 
         function movePiece(fromR, fromC, toR, toC, moveType, sendNetwork) {
             const piece = boardState[fromR][fromC];
+            
             if (moveType === "castle-kingside") {
-                boardState[toR][toC] = piece; boardState[fromR][fromC] = '';
-                boardState[toR][5] = boardState[toR][7]; boardState[toR][7] = '';
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[toR][5] = boardState[toR][7];
+                boardState[toR][7] = '';
             } else if (moveType === "castle-queenside") {
-                boardState[toR][toC] = piece; boardState[fromR][fromC] = '';
-                boardState[toR][3] = boardState[toR][0]; boardState[toR][0] = '';
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[toR][3] = boardState[toR][0];
+                boardState[toR][0] = '';
             } else if (moveType === "en-passant") {
-                boardState[toR][toC] = piece; boardState[fromR][fromC] = ''; boardState[fromR][toC] = '';
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[fromR][toC] = '';
             } else {
-                boardState[toR][toC] = piece; boardState[fromR][fromC] = '';
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
             }
 
-            enPassantTarget = (piece.toLowerCase() === 'p' && Math.abs(toR - fromR) === 2) ? { r: (fromR + toR) / 2, c: fromC } : null;
+            if (piece.toLowerCase() === 'p' && Math.abs(toR - fromR) === 2) {
+                enPassantTarget = { r: (fromR + toR) / 2, c: fromC };
+            } else {
+                enPassantTarget = null;
+            }
 
             if (fromR === 7 && fromC === 4) hasMoved.whiteKing = true;
             if (fromR === 7 && fromC === 0) hasMoved.whiteRookA = true;
@@ -286,66 +327,117 @@
             if (fromR === 0 && fromC === 0) hasMoved.blackRookA = true;
             if (fromR === 0 && fromC === 7) hasMoved.blackRookH = true;
 
-            if (sendNetwork && gameMode === "Online" && conn) conn.send({ type: 'move', fromR, fromC, toR, toC, moveType });
+            if (sendNetwork && gameMode === "Online" && conn) {
+                conn.send({ type: 'move', fromR, fromC, toR, toC, moveType });
+            }
 
             turn = turn === "W" ? "B" : "W";
+            
             if (hasNoLegalMoves(turn)) {
-                isGameOver = true; gameOverScreen.style.display = "flex";
+                isGameOver = true;
+                gameOverScreen.style.display = "flex";
                 winnerText.innerText = isInCheck(turn) ? (turn === "W" ? "Black Wins!" : "White Wins!") : "Draw!";
                 return;
             }
+            
             statusElement.innerText = isInCheck(turn) ? "CHECK!" : (turn === "W" ? "White's Turn" : "Black's Turn");
         }
 
         function isEnemyOrEmpty(r, c, isWhite, state) {
             if (r < 0 || r >= 8 || c < 0 || c >= 8) return { valid: false, stop: true };
-            const t = state[r][c]; if (!t) return { valid: true, stop: false };
+            const t = state[r][c];
+            if (!t) return { valid: true, stop: false };
             return { valid: (isWhite !== (t === t.toUpperCase())), stop: true };
         }
 
         function getRawMoves(r, c, state, includeSpecial) {
-            const moves = []; const piece = state[r][c]; if (!piece) return moves;
-            const isWhite = piece === piece.toUpperCase(); const type = piece.toLowerCase();
+            const moves = [];
+            const piece = state[r][c];
+            if (!piece) return moves;
+            
+            const isWhite = piece === piece.toUpperCase();
+            const type = piece.toLowerCase();
 
             if (type === 'p') {
                 const dir = isWhite ? -1 : 1;
-                if (!state[r + dir][c]) {
-                    moves.push({ r: r + dir, c: c, type: "normal" });
-                    if (r === (isWhite ? 6 : 1) && !state[r + 2 * dir][c]) moves.push({ r: r + 2 * dir, c: c, type: "normal" });
+                const nextRow = r + dir;
+                if (nextRow >= 0 && nextRow < 8 && !state[nextRow][c]) {
+                    moves.push({ r: nextRow, c: c, type: "normal" });
+                    const startRow = isWhite ? 6 : 1;
+                    if (r === startRow && !state[r + 2 * dir][c]) {
+                        moves.push({ r: r + 2 * dir, c: c, type: "normal" });
+                    }
                 }
                 [-1, 1].forEach(dc => {
-                    const tc = c + dc; if (tc < 0 || tc >= 8) return;
-                    const t = state[r + dir][tc];
-                    if (t && (t === t.toUpperCase()) !== isWhite) moves.push({ r: r + dir, c: tc, type: "normal" });
-                    if (includeSpecial && enPassantTarget && enPassantTarget.r === (r + dir) && enPassantTarget.c === tc) moves.push({ r: r + dir, c: tc, type: "en-passant" });
+                    const tc = c + dc;
+                    if (tc >= 0 && tc < 8 && nextRow >= 0 && nextRow < 8) {
+                        const t = state[nextRow][tc];
+                        if (t && (t === t.toUpperCase()) !== isWhite) {
+                            moves.push({ r: nextRow, c: tc, type: "normal" });
+                        }
+                        if (includeSpecial && enPassantTarget && enPassantTarget.r === nextRow && enPassantTarget.c === tc) {
+                            moves.push({ r: nextRow, c: tc, type: "en-passant" });
+                        }
+                    }
                 });
             }
+            
             if (type === 'r' || type === 'q') {
-                [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1}].forEach(d => {
-                    let s = 1; while (true) { const res = isEnemyOrEmpty(r+d.r*s, c+d.c*s, isWhite, state); if (res.valid) moves.push({r:r+d.r*s, c:c+d.c*s, type:"normal"}); if (res.stop) break; s++; }
+                const dirs = [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1}];
+                dirs.forEach(d => {
+                    let s = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + d.r * s, c + d.c * s, isWhite, state);
+                        if (res.valid) moves.push({ r: r + d.r * s, c: c + d.c * s, type: "normal" });
+                        if (res.stop) break;
+                        s++;
+                    }
                 });
             }
+            
             if (type === 'b' || type === 'q') {
-                [{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}].forEach(d => {
-                    let s = 1; while (true) { const res = isEnemyOrEmpty(r+d.r*s, c+d.c*s, isWhite, state); if (res.valid) moves.push({r:r+d.r*s, c:c+d.c*s, type:"normal"}); if (res.stop) break; s++; }
+                const dirs = [{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
+                dirs.forEach(d => {
+                    let s = 1;
+                    while (true) {
+                        const res = isEnemyOrEmpty(r + d.r * s, c + d.c * s, isWhite, state);
+                        if (res.valid) moves.push({ r: r + d.r * s, c: c + d.c * s, type: "normal" });
+                        if (res.stop) break;
+                        s++;
+                    }
                 });
             }
+            
             if (type === 'n') {
-                [{r:2,c:1},{r:2,c:-1},{r:-2,c:1},{r:-2,c:-1},{r:1,c:2},{r:1,c:-2},{r:-1,c:2},{r:-1,c:-2}].forEach(j => {
-                    const res = isEnemyOrEmpty(r + j.r, c + j.c, isWhite, state); if (res.valid) moves.push({ r: r + j.r, c: c + j.c, type: "normal" });
+                const jumps = [{r:2,c:1},{r:2,c:-1},{r:-2,c:1},{r:-2,c:-1},{r:1,c:2},{r:1,c:-2},{r:-1,c:2},{r:-1,c:-2}];
+                jumps.forEach(j => {
+                    const res = isEnemyOrEmpty(r + j.r, c + j.c, isWhite, state);
+                    if (res.valid) moves.push({ r: r + j.r, c: c + j.c, type: "normal" });
                 });
             }
+            
             if (type === 'k') {
-                [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1},{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}].forEach(s => {
-                    const res = isEnemyOrEmpty(r + s.r, c + s.c, isWhite, state); if (res.valid) moves.push({ r: r + s.r, c: c + s.c, type: "normal" });
+                const steps = [{r:1,c:0},{r:-1,c:0},{r:0,c:1},{r:0,c:-1},{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
+                steps.forEach(s => {
+                    const res = isEnemyOrEmpty(r + s.r, c + s.c, isWhite, state);
+                    if (res.valid) moves.push({ r: r + s.r, c: c + s.c, type: "normal" });
                 });
+                
                 if (includeSpecial && !isInCheck(isWhite ? "W" : "B")) {
                     if (isWhite && !hasMoved.whiteKing) {
-                        if (!hasMoved.whiteRookH && !state[7][5] && !state[7][6] && isSquareSafe(7, 5, "W") && isSquareSafe(7, 6, "W")) moves.push({ r: 7, c: 6, type: "castle-kingside" });
-                        if (!hasMoved.whiteRookA && !state[7][1] && !state[7][2] && !state[7][3] && isSquareSafe(7, 2, "W") && isSquareSafe(7, 3, "W")) moves.push({ r: 7, c: 2, type: "castle-queenside" });
+                        if (!hasMoved.whiteRookH && !state[7][5] && !state[7][6] && isSquareSafe(7, 5, "W") && isSquareSafe(7, 6, "W")) {
+                            moves.push({ r: 7, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.whiteRookA && !state[7][1] && !state[7][2] && !state[7][3] && isSquareSafe(7, 2, "W") && isSquareSafe(7, 3, "W")) {
+                            moves.push({ r: 7, c: 2, type: "castle-queenside" });
+                        }
                     } else if (!isWhite && !hasMoved.blackKing) {
-                        if (!hasMoved.blackRookH && !state[0][5] && !state[0][6] && isSquareSafe(0, 5, "B") && isSquareSafe(0, 6, "B")) moves.push({ r: 0, c: 6, type: "castle-kingside" });
-                        if (!hasMoved.blackRookA && !state[0][1] && !state[0][2] && !state[0][3] && isSquareSafe(0, 2, "B") && isSquareSafe(0, 3, "B")) moves.push({ r: 0, c: 2, type: "castle-queenside" });
+                        if (!hasMoved.blackRookH && !state[0][5] && !state[0][6] && isSquareSafe(0, 5, "B") && isSquareSafe(0, 6, "B")) {
+                            moves.push({ r: 0, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.blackRookA && !state[0][1] && !state[0][2] && !state[0][3] && isSquareSafe(0, 2, "B") && isSquareSafe(0, 3, "B")) {
+                            moves.push({ r: 0, c: 2, type: "castle-queenside" });
+                        }
                     }
                 }
             }
@@ -354,15 +446,23 @@
 
         function getFilteredLegalMoves(r, c) {
             const rawMoves = getRawMoves(r, c, boardState, true);
-            const piece = boardState[r][c]; const isWhite = piece === piece.toUpperCase();
+            const piece = boardState[r][c];
+            const isWhite = piece === piece.toUpperCase();
+            
             return rawMoves.filter(m => {
                 const originalTarget = boardState[m.r][m.c];
                 const originalPawn = m.type === "en-passant" ? boardState[r][m.c] : null;
+                
                 if (m.type === "en-passant") boardState[r][m.c] = '';
-                boardState[m.r][m.c] = boardState[r][c]; boardState[r][c] = '';
+                boardState[m.r][m.c] = boardState[r][c];
+                boardState[r][c] = '';
+                
                 const safe = !isInCheck(isWhite ? "W" : "B");
-                boardState[r][c] = boardState[m.r][m.c]; boardState[m.r][m.c] = originalTarget;
+                
+                boardState[r][c] = boardState[m.r][m.c];
+                boardState[m.r][m.c] = originalTarget;
                 if (m.type === "en-passant") boardState[r][m.c] = originalPawn;
+                
                 return safe;
             });
         }
@@ -371,8 +471,12 @@
             for (let tr = 0; tr < 8; tr++) {
                 for (let tc = 0; tc < 8; tc++) {
                     const p = boardState[tr][tc];
-                    if (p && (side === "W" ? p === p.toLowerCase() : p === p.toUpperCase())) {
-                        if (getRawMoves(tr, tc, boardState, false).some(m => m.r === r && m.c === c)) return false;
+                    if (p) {
+                        const isWhitePiece = p === p.toUpperCase();
+                        if ((side === "W" && !isWhitePiece) || (side === "B" && isWhitePiece)) {
+                            const raw = getRawMoves(tr, tc, boardState, false);
+                            if (raw.some(m => m.r === r && m.c === c)) return false;
+                        }
                     }
                 }
             }
@@ -380,10 +484,14 @@
         }
 
         function isInCheck(side) {
-            let kingPos = null; const tk = side === "W" ? "K" : "k";
+            let kingPos = null;
+            const tk = side === "W" ? "K" : "k";
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
-                    if (boardState[r][c] === tk) { kingPos = { r, c }; break; }
+                    if (boardState[r][c] === tk) {
+                        kingPos = { r, c };
+                        break;
+                    }
                 }
                 if (kingPos) break;
             }
@@ -394,55 +502,15 @@
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     const p = boardState[r][c];
-                    if (p && ((side === "W" && p === p.toUpperCase()) || (side === "B" && p === p.toLowerCase()))) {
-                        if (getFilteredLegalMoves(r, c).length > 0) return false;
+                    if (p) {
+                        const isWhitePiece = p === p.toUpperCase();
+                        if ((side === "W" && isWhitePiece) || (side === "B" && !isWhitePiece)) {
+                            if (getFilteredLegalMoves(r, c).length > 0) return false;
+                        }
                     }
                 }
             }
             return true;
         }
 
-        function setMode(mode) {
-            gameMode = mode;
-            document.getElementById("mode-2p").classList.toggle("active", mode === "2P");
-            document.getElementById("mode-bot").classList.toggle("active", mode === "Bot");
-            document.getElementById("mode-online").classList.toggle("active", mode === "Online");
-            onlinePanel.style.display = mode === "Online" ? "block" : "none";
-            if (mode === "Online") initPeerJS();
-            resetGame(true);
-        }
-
-        function makeBotMove() {
-            if (isGameOver) return; const allMoves = [];
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const p = boardState[r][c];
-                    if (p && p === p.toLowerCase()) {
-                        getFilteredLegalMoves(r, c).forEach(m => allMoves.push({ fromR: r, fromC: c, toR: m.r, toC: m.c, type: m.type }));
-                    }
-                }
-            }
-            if (allMoves.length > 0) {
-                const m = allMoves[Math.floor(Math.random() * allMoves.length)];
-                movePiece(m.fromR, m.fromC, m.toR, m.toC, m.type, false);
-            }
-            createBoard();
-        }
-
-        function resetGame(sendNetwork) {
-            boardState = [
-                ['r','n','b','q','k','b','n','r'], ['p','p','p','p','p','p','p','p'],
-                ['','','','','','','',''], ['','','','','','','',''],
-                ['','','','','','','',''], ['','','','','','','',''],
-                ['P','P','P','P','P','P','P','P'], ['R','N','B','Q','K','B','N','R']
-            ];
-            turn = "W"; selectedSquare = null; validMoves = []; isGameOver = false; enPassantTarget = null;
-            hasMoved = { 'whiteKing': false, 'whiteRookA': false, 'whiteRookH': false, 'blackKing': false, 'blackRookA': false, 'blackRookH': false };
-            statusElement.innerText = "White's Turn"; gameOverScreen.style.display = "none";
-            if (sendNetwork && gameMode === "Online" && conn) conn.send({ type: 'reset' });
-            createBoard();
-        }
-        resetGame(false);
-    </script>
-</body>
-</html>
+        function
