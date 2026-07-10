@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chess Game</title>
+    <!-- PeerJS Library Import -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -17,10 +19,11 @@
             margin: 0;
             padding: 10px;
             box-sizing: border-box;
+            position: relative;
         }
 
         .controls {
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
@@ -48,11 +51,52 @@
             color: #fff;
         }
 
+        /* ONLINE MULTIPLAYER BAR */
+        .online-panel {
+            display: none;
+            background-color: #1e1e1e;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #333;
+            text-align: center;
+            max-width: 400px;
+            width: 90vw;
+            box-sizing: border-box;
+        }
+
+        .online-panel input {
+            padding: 8px;
+            font-size: 14px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #2b2b2b;
+            color: #fff;
+            width: 60%;
+            margin-top: 5px;
+        }
+
+        .id-display {
+            background-color: #2b2b2b;
+            padding: 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            cursor: pointer;
+            color: #00bcd4;
+            display: inline-block;
+            margin-top: 5px;
+            word-break: break-all;
+        }
+
         #status {
             font-size: 20px;
             font-weight: bold;
             margin-bottom: 15px;
             color: #00bcd4;
+        }
+
+        #board-container {
+            position: relative;
         }
 
         #board {
@@ -106,6 +150,36 @@
             position: absolute;
             z-index: 10;
         }
+
+        #game-over-screen {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            z-index: 100;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+        }
+
+        #game-over-screen h2 {
+            font-size: 28px;
+            color: #00bcd4;
+            margin-bottom: 20px;
+            text-align: center;
+            padding: 0 10px;
+        }
+
+        #game-over-screen button {
+            background-color: #00bcd4;
+            color: #000;
+            font-size: 18px;
+            padding: 12px 25px;
+        }
     </style>
 </head>
 <body>
@@ -113,11 +187,30 @@
     <div class="controls">
         <button id="mode-2p" class="active" onclick="setMode('2P')">2 Player</button>
         <button id="mode-bot" onclick="setMode('Bot')">Play vs Bot</button>
+        <button id="mode-online" onclick="setMode('Online')">Play Online</button>
         <button class="reset-btn" onclick="resetGame()">Reset</button>
     </div>
 
+    <!-- PeerJS Connection Panel -->
+    <div id="online-panel" class="online-panel">
+        <div>Your Lobby ID (Tap to Copy):</div>
+        <div id="my-id" class="id-display">Connecting to PeerJS...</div>
+        <div style="margin-top: 10px;">
+            <input type="text" id="peer-id-input" placeholder="Paste Friend's ID here">
+            <button onclick="connectToFriend()">Join</button>
+        </div>
+        <div id="connection-status" style="margin-top: 10px; font-size: 14px; color: #aaa;"></div>
+    </div>
+
     <div id="status">White's Turn</div>
-    <div id="board"></div>
+    
+    <div id="board-container">
+        <div id="board"></div>
+        <div id="game-over-screen">
+            <h2 id="winner-text">Checkmate!</h2>
+            <button onclick="resetGame()">Play Again</button>
+        </div>
+    </div>
 
     <script>
         const imageMap = {
@@ -125,25 +218,88 @@
             'p': 'Bp.jpg', 'r': 'Br.jpg', 'n': 'Bn.jpg', 'b': 'BB.jpg', 'q': 'Bq.jpg', 'k': 'Bk.jpg'
         };
 
-        let boardState = [
-            ['r','n','b','q','k','b','n','r'],
-            ['p','p','p','p','p','p','p','p'],
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-            ['P','P','P','P','P','P','P','P'],
-            ['R','N','B','Q','K','B','N','R']
-        ];
-
+        let boardState = [];
         let turn = "W";
         let selectedSquare = null;
         let validMoves = [];
         let gameMode = "2P";
         let isGameOver = false;
 
+        // Multiplayer state tracking variables
+        let peer = null;
+        let conn = null;
+        let myColor = "W"; // Default host is White
+
+        let hasMoved = {
+            'whiteKing': false, 'whiteRookA': false, 'whiteRookH': false,
+            'blackKing': false, 'blackRookA': false, 'blackRookH': false
+        };
+        let enPassantTarget = null;
+
         const boardElement = document.getElementById("board");
         const statusElement = document.getElementById("status");
+        const gameOverScreen = document.getElementById("game-over-screen");
+        const winnerText = document.getElementById("winner-text");
+        const onlinePanel = document.getElementById("online-panel");
+        const myIdDisplay = document.getElementById("my-id");
+        const connStatusDisplay = document.getElementById("connection-status");
+
+        // Initializing PeerJS network background tasks
+        function initPeerJS() {
+            if (peer) return;
+
+            // Creates a random peer connector connection room ID server endpoint
+            peer = new Peer();
+
+            peer.on('open', (id) => {
+                myIdDisplay.innerText = id;
+            });
+
+            // Handles inbound player room connection entries
+            peer.on('connection', (connection) => {
+                conn = connection;
+                myColor = "W"; // Host defaults to White player assets
+                setupConnectionListeners();
+                connStatusDisplay.innerText = "Connected! You are playing White.";
+            });
+
+            // Tap-to-copy utility for mobile device users
+            myIdDisplay.addEventListener('click', () => {
+                navigator.clipboard.writeText(myIdDisplay.innerText);
+                alert("Lobby ID copied to clipboard!");
+            });
+        }
+
+        function connectToFriend() {
+            const friendId = document.getElementById("peer-id-input").value.trim();
+            if (!friendId) return;
+
+            connStatusDisplay.innerText = "Connecting...";
+            conn = peer.connect(friendId);
+            myColor = "B"; // Joiner defaults to Black player assets
+            setupConnectionListeners();
+        }
+
+        function setupConnectionListeners() {
+            conn.on('open', () => {
+                connStatusDisplay.innerText = "Connected! You are playing Black.";
+                resetGame();
+            });
+
+            conn.on('data', (data) => {
+                if (data.type === 'move') {
+                    movePiece(data.fromR, data.fromC, data.toR, data.toC, data.moveType, false);
+                    createBoard();
+                } else if (data.type === 'reset') {
+                    resetGame(false);
+                }
+            });
+
+            conn.on('close', () => {
+                connStatusDisplay.innerText = "Friend disconnected.";
+                conn = null;
+            });
+        }
 
         function createBoard() {
             boardElement.innerHTML = "";
@@ -179,12 +335,19 @@
         function handleSquareClick(r, c) {
             if (isGameOver) return;
             if (gameMode === "Bot" && turn === "B") return;
+            
+            // Lock active turns to matching Peer colors when online
+            if (gameMode === "Online") {
+                if (!conn) return; 
+                if (turn !== myColor) return; 
+            }
 
             const piece = boardState[r][c];
             const isWhite = piece && piece === piece.toUpperCase();
+            const targetMove = validMoves.find(m => m.r === r && m.c === c);
 
-            if (selectedSquare && validMoves.some(m => m.r === r && m.c === c)) {
-                movePiece(selectedSquare.r, selectedSquare.c, r, c);
+            if (selectedSquare && targetMove) {
+                movePiece(selectedSquare.r, selectedSquare.c, r, c, targetMove.type, true);
                 selectedSquare = null;
                 validMoves = [];
                 createBoard();
@@ -205,32 +368,56 @@
             createBoard();
         }
 
-        function movePiece(fromR, fromC, toR, toC) {
-            const capturedPiece = boardState[toR][toC];
+        function movePiece(fromR, fromC, toR, toC, moveType = "normal", sendNetwork = true) {
+            const piece = boardState[fromR][fromC];
             
-            boardState[toR][toC] = boardState[fromR][fromC];
-            boardState[fromR][fromC] = '';
+            if (moveType === "castle-kingside") {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[toR][5] = boardState[toR][7];
+                boardState[toR][7] = '';
+            } else if (moveType === "castle-queenside") {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[toR][3] = boardState[toR][0];
+                boardState[toR][0] = '';
+            } else if (moveType === "en-passant") {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+                boardState[fromR][toC] = '';
+            } else {
+                boardState[toR][toC] = piece;
+                boardState[fromR][fromC] = '';
+            }
 
-            if (capturedPiece === 'k') {
-                statusElement.innerText = "🏆 White Wins!";
-                isGameOver = true;
-                return;
-            } else if (capturedPiece === 'K') {
-                statusElement.innerText = "🏆 Black Wins!";
-                isGameOver = true;
-                return;
+            if (piece.toLowerCase() === 'p' && Math.abs(toR - fromR) === 2) {
+                enPassantTarget = { r: (fromR + toR) / 2, c: fromC };
+            } else {
+                enPassantTarget = null;
+            }
+
+            if (fromR === 7 && fromC === 4) hasMoved.whiteKing = true;
+            if (fromR === 7 && fromC === 0) hasMoved.whiteRookA = true;
+            if (fromR === 7 && fromC === 7) hasMoved.whiteRookH = true;
+            if (fromR === 0 && fromC === 4) hasMoved.blackKing = true;
+            if (fromR === 0 && fromC === 0) hasMoved.blackRookA = true;
+            if (fromR === 0 && fromC === 7) hasMoved.blackRookH = true;
+
+            // Syncs moves over network stream channels
+            if (sendNetwork && gameMode === "Online" && conn) {
+                conn.send({ type: 'move', fromR, fromC, toR, toC, moveType });
             }
 
             turn = turn === "W" ? "B" : "W";
             
-            // Check if next player has any legal moves. If not, game over.
             if (hasNoLegalMoves(turn)) {
-                if (isInCheck(turn)) {
-                    statusElement.innerText = turn === "W" ? "🏆 Black Wins by Checkmate!" : "🏆 White Wins by Checkmate!";
-                } else {
-                    statusElement.innerText = "🤝 Draw by Stalemate!";
-                }
                 isGameOver = true;
+                gameOverScreen.style.display = "flex";
+                if (isInCheck(turn)) {
+                    winnerText.innerText = turn === "W" ? "🏆 Black Wins by Checkmate!" : "🏆 White Wins by Checkmate!";
+                } else {
+                    winnerText.innerText = "🤝 Draw by Stalemate!";
+                }
                 return;
             }
 
@@ -250,7 +437,7 @@
             return { valid: false, stop: true };
         }
 
-        function getRawMoves(r, c, state = boardState) {
+        function getRawMoves(r, c, state = boardState, includeSpecial = true) {
             const moves = [];
             const piece = state[r][c];
             if (!piece) return moves;
@@ -262,9 +449,9 @@
                 const startRow = isWhite ? 6 : 1;
                 
                 if (r + dir >= 0 && r + dir < 8 && !state[r + dir][c]) {
-                    moves.push({ r: r + dir, c });
+                    moves.push({ r: r + dir, c: c, type: "normal" });
                     if (r === startRow && !state[r + 2 * dir][c]) {
-                        moves.push({ r: r + 2 * dir, c });
+                        moves.push({ r: r + 2 * dir, c: c, type: "normal" });
                     }
                 }
                 [-1, 1].forEach(dc => {
@@ -273,7 +460,10 @@
                     if (targetR >= 0 && targetR < 8 && targetC >= 0 && targetC < 8) {
                         const target = state[targetR][targetC];
                         if (target && (target === target.toUpperCase()) !== isWhite) {
-                            moves.push({ r: targetR, c: targetC });
+                            moves.push({ r: targetR, c: targetC, type: "normal" });
+                        }
+                        if (includeSpecial && enPassantTarget && enPassantTarget.r === targetR && enPassantTarget.c === targetC) {
+                            moves.push({ r: targetR, c: targetC, type: "en-passant" });
                         }
                     }
                 });
@@ -285,7 +475,7 @@
                     let steps = 1;
                     while (true) {
                         const res = isEnemyOrEmpty(r + d.r * steps, c + d.c * steps, isWhite, state);
-                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps });
+                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps, type: "normal" });
                         if (res.stop) break;
                         steps++;
                     }
@@ -298,7 +488,7 @@
                     let steps = 1;
                     while (true) {
                         const res = isEnemyOrEmpty(r + d.r * steps, c + d.c * steps, isWhite, state);
-                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps });
+                        if (res.valid) moves.push({ r: r + d.r * steps, c: c + d.c * steps, type: "normal" });
                         if (res.stop) break;
                         steps++;
                     }
@@ -312,7 +502,7 @@
                 ];
                 jumps.forEach(j => {
                     const res = isEnemyOrEmpty(r + j.r, c + j.c, isWhite, state);
-                    if (res.valid) moves.push({ r: r + j.r, c: c + j.c });
+                    if (res.valid) moves.push({ r: r + j.r, c: c + j.c, type: "normal" });
                 });
             }
 
@@ -322,134 +512,36 @@
                     {r:1,c:1}, {r:1,c:-1}, {r:-1,c:1}, {r:-1,c:-1}
                 ];
                 steps.forEach(s => {
-                    const res = isEnemyOrEmpty(r + s.r, c + s.c, isWhite, state);
-                    if (res.valid) moves.push({ r: r + s.r, c: c + s.c });
+                    const res = isEnemyOrEmpty(r + s.r, s.c + c, isWhite, state);
+                    if (res.valid) moves.push({ r: r + s.r, c: c + s.c, type: "normal" });
                 });
+
+                if (includeSpecial && !isInCheck(isWhite ? "W" : "B")) {
+                    if (isWhite && !hasMoved.whiteKing) {
+                        if (!hasMoved.whiteRookH && !state[7][5] && !state[7][6] && isSquareSafe(7, 5, "W") && isSquareSafe(7, 6, "W")) {
+                            moves.push({ r: 7, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.whiteRookA && !state[7][1] && !state[7][2] && !state[7][3] && isSquareSafe(7, 2, "W") && isSquareSafe(7, 3, "W")) {
+                            moves.push({ r: 7, c: 2, type: "castle-queenside" });
+                        }
+                    } else if (!isWhite && !hasMoved.blackKing) {
+                        if (!hasMoved.blackRookH && !state[0][5] && !state[0][6] && isSquareSafe(0, 5, "B") && isSquareSafe(0, 6, "B")) {
+                            moves.push({ r: 0, c: 6, type: "castle-kingside" });
+                        }
+                        if (!hasMoved.blackRookA && !state[0][1] && !state[0][2] && !state[0][3] && isSquareSafe(0, 2, "B") && isSquareSafe(0, 3, "B")) {
+                            moves.push({ r: 0, c: 2, type: "castle-queenside" });
+                        }
+                    }
+                }
             }
 
             return moves;
         }
 
-        // Simulates the move in the background to confirm it doesn't leave the king in check
         function getFilteredLegalMoves(r, c) {
-            const rawMoves = getRawMoves(r, c, boardState);
+            const rawMoves = getRawMoves(r, c, boardState, true);
             const piece = boardState[r][c];
             const isWhite = piece === piece.toUpperCase();
             const side = isWhite ? "W" : "B";
 
-            return rawMoves.filter(m => {
-                // Save state
-                const originalTarget = boardState[m.r][m.c];
-                // Try move
-                boardState[m.r][m.c] = boardState[r][c];
-                boardState[r][c] = '';
-                
-                const safe = !isInCheck(side);
-
-                // Revert move
-                boardState[r][c] = boardState[m.r][m.c];
-                boardState[m.r][m.c] = originalTarget;
-
-                return safe;
-            });
-        }
-
-        function isInCheck(side) {
-            let kingPos = null;
-            const targetKing = side === "W" ? "K" : "k";
-
-            // Find King
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    if (boardState[r][c] === targetKing) {
-                        kingPos = { r, c };
-                        break;
-                    }
-                }
-                if (kingPos) break;
-            }
-            if (!kingPos) return false;
-
-            // Check if any enemy piece attacks the king position
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const piece = boardState[r][c];
-                    if (piece) {
-                        const isWhite = piece === piece.toUpperCase();
-                        if ((side === "W" && !isWhite) || (side === "B" && isWhite)) {
-                            const enemyMoves = getRawMoves(r, c, boardState);
-                            if (enemyMoves.some(m => m.r === kingPos.r && m.c === kingPos.c)) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            return false;
-        }
-
-        function hasNoLegalMoves(side) {
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const piece = boardState[r][c];
-                    if (piece) {
-                        const isWhite = piece === piece.toUpperCase();
-                        if ((side === "W" && isWhite) || (side === "B" && !isWhite)) {
-                            const legal = getFilteredLegalMoves(r, c);
-                            if (legal.length > 0) return false;
-                        }
-                    }
-                }
-            }
-            return true;
-        }
-
-        function setMode(mode) {
-            gameMode = mode;
-            document.getElementById("mode-2p").classList.toggle("active", mode === "2P");
-            document.getElementById("mode-bot").classList.toggle("active", mode === "Bot");
-            resetGame();
-        }
-
-        function makeBotMove() {
-            if (isGameOver) return;
-            const allMoves = [];
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const piece = boardState[r][c];
-                    if (piece && piece === piece.toLowerCase()) {
-                        const moves = getFilteredLegalMoves(r, c);
-                        moves.forEach(m => allMoves.push({ fromR: r, fromC: c, toR: m.r, toC: m.c }));
-                    }
-                }
-            }
-            if (allMoves.length > 0) {
-                const randomMove = allMoves[Math.floor(Math.random() * allMoves.length)];
-                movePiece(randomMove.fromR, randomMove.fromC, randomMove.toR, randomMove.toC);
-            }
-            createBoard();
-        }
-
-        function resetGame() {
-            boardState = [
-                ['r','n','b','q','k','b','n','r'],
-                ['p','p','p','p','p','p','p','p'],
-                ['','','','','','','',''],
-                ['','','','','','','',''],
-                ['','','','','','','',''],
-                ['','','','','','','',''],
-                ['P','P','P','P','P','P','P','P'],
-                ['R','N','B','Q','K','B','N','R']
-            ];
-            turn = "W";
-            selectedSquare = null;
-            validMoves = [];
-            isGameOver = false;
-            statusElement.innerText = "White's Turn";
-            createBoard();
-        }
-
-        createBoard();
-    </script>
-</body>
-</html>
+            return rawMoves.filt
